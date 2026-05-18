@@ -919,7 +919,12 @@ vlm_chat: &vlm_chat_app
         - name: Qwen3-VL-2B-Instruct
           source: gen-ai-mz
 
-vlm_flask_app: *vlm_chat_app  # ADD THIS LINE - reuses vlm_chat model config
+vlm_flask_app:
+  models:
+    hailo10h:
+      default:
+        - name: Qwen3-VL-2B-Instruct
+          source: gen-ai-mz
 
 llm_chat: &llm_chat_app
   models:
