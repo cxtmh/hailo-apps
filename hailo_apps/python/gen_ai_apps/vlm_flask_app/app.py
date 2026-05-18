@@ -38,6 +38,9 @@ class VLMFlaskApp:
         self.frame_lock = threading.Lock()
         self.camera_running = False
 
+        self.picam2 = None  # For RPi camera
+        self.camera_type_obj = None  # Track which camera type is being used
+
         # Backend (VLM inference)
         self.backend = None
 
@@ -48,25 +51,34 @@ class VLMFlaskApp:
     def initialize_camera(self):
         """Initialize camera capture."""
         try:
-            if self.camera_type == "usb":
+            if self.camera_type == "rpi":
+                # Try to use picamera2 for RPi camera
+                try:
+                    from picamera2 import Picamera2
+                    self.picam2 = Picamera2()
+                    config = self.picam2.create_preview_configuration(
+                        main={"size": (640, 480), "format": "RGB888"},
+                        sensor={"output_size": self.picam2.sensor_resolution}  # Use full sensor
+                    )
+                    self.picam2.configure(config)
+                    self.picam2.start()
+                    logger.info("RPi camera initialized via picamera2")
+                    self.camera_type_obj = "picamera2"
+                except ImportError:
+                    logger.error("picamera2 not installed. Install with: pip install picamera2")
+                    raise
+            else:  # USB camera
                 self.cap = cv2.VideoCapture(self.camera_id)
                 if not self.cap.isOpened():
                     raise RuntimeError(f"Failed to open USB camera at /dev/video{self.camera_id}")
                 logger.info(f"USB camera initialized at /dev/video{self.camera_id}")
-            elif self.camera_type == "rpi":
-                # RPi camera support via libcamera (through v4l2)
-                self.cap = cv2.VideoCapture(self.camera_id)
-                if not self.cap.isOpened():
-                    raise RuntimeError(f"Failed to open RPi camera")
-                logger.info("RPi camera initialized")
-            else:
-                raise ValueError(f"Unknown camera type: {self.camera_type}")
-
-            # Set camera properties for better performance
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            self.cap.set(cv2.CAP_PROP_FPS, 30)
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimal buffer for low latency
+                
+                # Set camera properties for better performance
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                self.cap.set(cv2.CAP_PROP_FPS, 30)
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                self.camera_type_obj = "opencv"
 
         except Exception as e:
             logger.error(f"Camera initialization error: {e}")
@@ -183,10 +195,13 @@ class VLMFlaskApp:
         logger.info("Camera thread started")
         while self.camera_running:
             try:
-                ret, frame = self.cap.read()
-                if not ret:
-                    logger.warning("Failed to read frame from camera")
-                    continue
+                if self.camera_type_obj == "picamera2":
+                    frame = self.picam2.capture_array()
+                else:  # OpenCV
+                    ret, frame = self.cap.read()
+                    if not ret:
+                        logger.warning("Failed to read frame from camera")
+                        continue
 
                 with self.frame_lock:
                     self.current_frame = frame
@@ -196,8 +211,11 @@ class VLMFlaskApp:
                 break
 
         logger.info("Camera thread stopped")
-        if self.cap:
-            self.cap.release()
+        if self.camera_type_obj == "picamera2":
+            self.picam2.stop()
+        else:
+            if self.cap:
+                self.cap.release()
 
     def start(self, host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
         """
