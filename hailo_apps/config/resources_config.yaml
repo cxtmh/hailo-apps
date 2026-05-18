@@ -919,6 +919,8 @@ vlm_chat: &vlm_chat_app
         - name: Qwen3-VL-2B-Instruct
           source: gen-ai-mz
 
+vlm_flask_app: *vlm_chat_app  # ADD THIS LINE - reuses vlm_chat model config
+
 llm_chat: &llm_chat_app
   models:
     hailo8:
