@@ -84,17 +84,30 @@ class VLMFlaskApp:
             logger.error(f"Camera initialization error: {e}")
             raise
 
-    def initialize_backend(self, hef_path: str, system_prompt: str = "You are a helpful assistant that analyzes images and answers questions about them."):
+    def initialize_backend(self, hef_path: str, system_prompt: str = "You are a helpful assistant that analyzes images and answers questions about them.",
+                           enable_agent: bool = True):
         """
-        Initialize VLM Backend.
+        Initialize Backend (VLM or Agent mode).
 
         Args:
-            hef_path (str): Path to the VLM HEF model.
-            system_prompt (str): System prompt for VLM.
+            hef_path (str): Path to the LLM HEF model.
+            system_prompt (str): System prompt for LLM/agent.
+            enable_agent (bool): Enable agent mode with tool calling. Defaults to True.
         """
         try:
-            self.backend = Backend(hef_path=hef_path, system_prompt=system_prompt)
-            logger.info("VLM Backend initialized")
+            # Get app directory (discover_tool_modules will look for tools/ inside it)
+            tools_dir = self.app_dir if self.app_dir else None
+            
+            self.backend = Backend(
+                hef_path=hef_path,
+                system_prompt=system_prompt,
+                enable_agent=enable_agent,
+                tools_dir=tools_dir if tools_dir and (tools_dir / "tools").exists() else None
+            )
+            if enable_agent:
+                logger.info("Agent backend initialized")
+            else:
+                logger.info("VLM backend initialized")
         except Exception as e:
             logger.error(f"Backend initialization error: {e}")
             raise
@@ -151,15 +164,21 @@ class VLMFlaskApp:
                     frame = self.current_frame.copy()
 
                 # Run inference
-                logger.info(f"Running inference with prompt: {prompt}")
+                logger.info(f"Running agent inference with prompt: {prompt}")
                 emit('status', {'message': '⏳ Processing...'})
 
-                result = self.backend.vlm_inference(frame, prompt, timeout=30)
+                result = self.backend.agent_inference(frame, prompt, timeout=60)
+
+                # Extract result details
+                answer = result.get('answer', '')
+                time_str = result.get('time', '')
+                tools_made = result.get('tools_made', [])
 
                 # Send result back to client
                 emit('result', {
-                    'answer': result.get('answer', ''),
-                    'time': result.get('time', '')
+                    'answer': answer,
+                    'time': time_str,
+                    'tools_made': tools_made
                 })
 
             except Exception as e:

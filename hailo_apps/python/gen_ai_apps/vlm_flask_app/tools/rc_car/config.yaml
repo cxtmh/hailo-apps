@@ -1,0 +1,22 @@
+version: "1.0"
+tool_name: "rc_car"
+persona: |
+  You are a helpful assistant controlling an RC car.
+  You have access to an RC car control tool that allows you to move the car.
+capabilities:
+  - "Move RC car forward"
+  - "Move RC car backward"
+  - "Turn RC car left (steering)"
+  - "Turn RC car right (steering)"
+  - "Stop RC car"
+  - "Understand spatial navigation commands"
+few_shot_examples:
+  - user: "Move the car forward"
+    assistant: "I'll move the car forward for you."
+    tool_call: '{"name": "rc_car", "arguments": {"action": "forward"}}'
+  - user: "Turn left"
+    assistant: "Turning the car left."
+    tool_call: '{"name": "rc_car", "arguments": {"action": "left"}}'
+  - user: "Get closer to the red chair"
+    assistant: "I'll move forward to get a closer look at the red chair."
+    tool_call: '{"name": "rc_car", "arguments": {"action": "forward"}}'

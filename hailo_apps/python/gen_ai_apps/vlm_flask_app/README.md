@@ -1,6 +1,6 @@
-# VLM Flask App
+# VLM Flask App with RC Car Control
 
-A web-based Vision Language Model (VLM) application that streams live camera feed and accepts natural language questions via WebSocket. Provides a browser-accessible interface for real-time image understanding on Hailo-10H.
+A web-based Vision Language Model (VLM) application with agent tool calling. Streams live camera feed and accepts natural language commands to control an RC car via LLM with tools. Provides a browser-accessible interface for real-time image understanding + hardware control on Hailo-10H.
 
 ## Features
 
@@ -8,19 +8,26 @@ A web-based Vision Language Model (VLM) application that streams live camera fee
 - Live MJPEG video feed from USB or Raspberry Pi cameras
 - Low-latency browser-based visualization with HTML5
 
-🤖 **VLM Inference**
-- Run Qwen2-VL or other VLM models on Hailo-10H
-- Ask natural language questions about the camera feed
-- Streaming token output for real-time feedback
+🤖 **LLM Agent with Tool Calling**
+- Run LLM on Hailo-10H for reasoning and tool selection
+- Parse tool calls and execute RC car movements
+- Full agent loop: LLM → tool call → execute → continue
+
+🎮 **RC Car Control**
+- Control RC car via PCA9685 PWM module
+- Actions: forward, backward, left, right, stop
+- Natural language commands: "Move closer to the chair"
+- Mock hardware mode for testing without hardware
 
 🌐 **Web-Based Interface**
 - Modern, responsive HTML5 UI with dark mode support
-- Chat-like interface for user questions and VLM responses
+- Chat-like interface for commands and responses
 - WebSocket for bidirectional real-time communication
 
 📱 **Flexible Input**
 - USB camera support (auto-detection)
 - Raspberry Pi camera support (libcamera)
+- Real or mock RC car hardware
 - Customizable system prompts
 
 ## Installation
@@ -30,6 +37,11 @@ A web-based Vision Language Model (VLM) application that streams live camera fee
 - Hailo-10H accelerator installed and configured
 - Python 3.10+
 - USB or Raspberry Pi camera connected
+- **(Optional) RC Car Hardware:**
+  - PCA9685 PWM controller (I2C address 0x40 by default)
+  - RC car with motor (throttle on channel 1) and servo (steering on channel 0)
+  - Raspberry Pi or desktop with I2C support
+  - Note: Can use mock hardware for testing without real hardware
 
 ### Setup
 
@@ -91,39 +103,102 @@ Once the app starts, open your browser and navigate to:
 http://localhost:5000
 ```
 
+### RC Car Control (Optional)
+
+The app includes an RC car control tool that the LLM can invoke based on natural language commands.
+
+#### Using Mock Hardware (for testing)
+
+```bash
+export RC_CAR_MOCK=true
+python3 hailo_apps/python/gen_ai_apps/vlm_flask_app/vlm_flask_app.py --input usb
+```
+
+#### Using Real Hardware (PCA9685 + RC Car)
+
+**Wiring:**
+- PCA9685 Channel 0: Steering servo (PWM)
+- PCA9685 Channel 1: Motor ESC (PWM)
+- PCA9685 Power: 5V and GND
+- I2C: SCL (GPIO 3), SDA (GPIO 2) on Raspberry Pi
+
+**Commands:**
+```bash
+# No environment variable = use real hardware
+python3 hailo_apps/python/gen_ai_apps/vlm_flask_app/vlm_flask_app.py --input usb
+```
+
+**Testing RC Car:**
+```bash
+# Send command: "move forward"
+# LLM will call rc_car tool with action="forward"
+# Car will move forward on channel 1
+```
+
+#### Supported RC Car Commands
+
+The LLM will recognize these natural language commands:
+- "move the car forward"
+- "go back" / "move backward"
+- "turn left"
+- "turn right"
+- "stop the car"
+- "move closer to the red chair" (forward implied)
+
+#### Hardware Notes
+
+**Verified (tested):**
+- Motor forward (channel 1, 1800 µs)
+- Motor backward (channel 1, 1200 µs)
+- Stop (both channels, 1500 µs neutral)
+
+**Untested (use with caution):**
+- Steering left (channel 0, 1300 µs)
+- Steering right (channel 0, 1700 µs)
+
 ## Architecture
 
 ```
-Browser Client                           Flask Server              Hailo-10H
-┌──────────────────┐                    ┌──────────────────┐      ┌─────────┐
-│ HTML5 Canvas     │──── MJPEG stream ──│ /video endpoint  │
-│                  │                    │                  │
-│ Chat Interface   │◄─── WebSocket ────│ /ws endpoint     │      │ VLM     │
-│                  │   (ask/result)     │                  │      │ Backend │
-└──────────────────┘                    │ Camera Thread    │────→ │         │
-                                        │ + Backend        │◄──── │ VDevice │
-                                        └──────────────────┘      │ + Model │
-                                                                  └─────────┘
+Browser Client                    Flask Server                 Hailo-10H
+┌──────────────────┐            ┌─────────────────────┐       ┌───────────┐
+│ HTML5 Canvas     │────────────│ /video endpoint     │
+│                  │ MJPEG      │                     │
+│ Chat Interface   │◄──────────│ WebSocket Handler   │       │ LLM       │
+│                  │ WebSocket  │                     │       │ Backend   │
+└──────────────────┘ (command)  │ Camera Thread       │──────│           │
+                   (response)   │ (frame capture)     │ ────→│ VDevice   │
+                                │                     │◄────│ + Model   │
+                                │ Tool Execution      │       └───────────┘
+                                │ (RC car commands)   │
+                                │                     │       ┌───────────┐
+                                │ PCA9685 Control─────────→│ RC Car:   │
+                                └─────────────────────┘       │ Motor +   │
+                                                              │ Servo     │
+                                                              └───────────┘
 ```
 
 ### Component Descriptions
 
-- **HTML5 Canvas**: Displays MJPEG stream from `/video` endpoint
-- **Chat Interface**: WebSocket client for sending questions and receiving responses
-- **MJPEG Stream** (`/video`): Continuous video feed encoded as JPEG frames
-- **WebSocket Handler** (`/ws`): Bidirectional communication for Q&A
+- **HTML5 Canvas**: Displays MJPEG stream from `/video` endpoint (runs continuously)
+- **Chat Interface**: WebSocket client for sending commands and receiving responses
+- **MJPEG Stream** (`/video`): Live video feed encoded as JPEG frames
+- **WebSocket Handler**: Receives user commands, calls backend.agent_inference()
 - **Camera Thread**: Background thread capturing frames from USB/RPi camera
-- **Backend**: Multiprocessing VLM inference (unchanged from vlm_chat)
+- **Agent Backend**: Multiprocessing LLM inference with tool calling
+  - Initializes LLM model on Hailo-10H VDevice
+  - Discovers and loads RC car tool
+  - Implements agent loop: LLM → parse tools → execute → continue
+- **Tool Execution**: Invokes rc_car tool methods (forward, backward, left, right, stop)
+- **RC Car Control**: PCA9685 PWM module controls motor and steering servo
 
 ## WebSocket Protocol
 
 ### Client → Server
 
-**Ask a Question:**
+**Send Command:**
 ```json
 {
-  "action": "ask",
-  "prompt": "What is in this image?"
+  "prompt": "Move the car forward to get closer to the chair"
 }
 ```
 
@@ -136,34 +211,108 @@ Browser Client                           Flask Server              Hailo-10H
 }
 ```
 
-**Result:**
+**Agent Result (with tool calls):**
 ```json
 {
-  "answer": "This is a person walking in a park...",
-  "time": "2.34 seconds"
+  "answer": "I'll move the car forward to get a closer look at the chair.",
+  "time": "3.45 seconds",
+  "tools_made": ["rc_car"]
 }
 ```
 
 **Error:**
 ```json
 {
-  "message": "Error: Failed to process image"
+  "message": "Error: Failed to process command"
 }
 ```
 
+### Agent Response Details
+
+- **answer**: Final text response from the LLM
+- **time**: Total processing time including LLM inference and tool execution
+- **tools_made**: List of tool names invoked (e.g., ["rc_car"] if car moved)
+
 ## Configuration
+
+### Application Settings
 
 Edit the constants in `vlm_flask_app.py` to customize behavior:
 
 ```python
-MAX_TOKENS = 200                 # Max VLM output tokens
+MAX_TOKENS = 200                 # Max LLM output tokens
 TEMPERATURE = 0.1               # Sampling temperature (lower = more deterministic)
 SEED = 42                        # Random seed for reproducibility
-SYSTEM_PROMPT = "..."            # System instruction for VLM
-INFERENCE_TIMEOUT = 60           # Timeout for inference (seconds)
+SYSTEM_PROMPT = "..."            # System instruction for LLM (guides tool usage)
 ```
 
-## Troubleshooting
+### Environment Variables
+
+```bash
+# Use mock RC car hardware (for testing)
+export RC_CAR_MOCK=true
+
+# Use real hardware (default if not set)
+unset RC_CAR_MOCK
+```
+
+### Backend Initialization
+
+The Flask app initializes the agent backend with:
+- `enable_agent=True`: Enable LLM agent with tool calling
+- `tools_dir`: Auto-detects tools/ directory for tool discovery
+- System prompt guides LLM to use RC car tool for movement commands
+
+## RC Car Tool Troubleshooting
+
+### Tool Not Invoked
+
+**Issue**: LLM doesn't call rc_car tool even when asked to move the car.
+
+**Solutions**:
+1. Check system prompt includes tool instruction (see Configuration)
+2. Try explicit commands: "move the car forward" instead of "advance"
+3. Check LLM is running in agent mode (`enable_agent=True` in backend)
+
+### PCA9685 Not Detected
+
+**Error**: `Failed to initialize MotorController: [I2C error]`
+
+**Solutions**:
+1. Verify I2C is enabled:
+   ```bash
+   sudo raspi-config  # On RPi
+   i2cdetect -y 1    # List I2C devices
+   ```
+2. Check PCA9685 I2C address is 0x40:
+   ```bash
+   i2cdetect -y 1 | grep 40
+   ```
+3. Verify wiring: SDA (GPIO 2), SCL (GPIO 3)
+4. Use mock mode for testing:
+   ```bash
+   export RC_CAR_MOCK=true
+   ```
+
+### Car Doesn't Move
+
+**Issue**: Tool executes but car stays still.
+
+**Solutions**:
+1. **Steering untested**: Left/right may not work yet (untested hardware path)
+2. **Check motor connection**: Verify channel 1 is connected to motor ESC
+3. **Verify PWM signals**: Use oscilloscope or PWM tester on channel 0/1
+4. **Check battery**: Ensure motor has sufficient power
+
+### Mock Hardware Not Working
+
+**Error**: `Could not import MockRCCarController`
+
+**Solution**:
+- Ensure `tools/rc_car/mock_hardware.py` exists
+- Re-run: `python3 vlm_flask_app.py --input usb` (without RC_CAR_MOCK if error)
+
+## General Troubleshooting
 
 ### USB Camera Not Detected
 

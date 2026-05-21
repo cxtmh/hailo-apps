@@ -53,7 +53,23 @@ from hailo_apps.python.gen_ai_apps.vlm_flask_app.app import VLMFlaskApp
 MAX_TOKENS = 200
 TEMPERATURE = 0.1
 SEED = 42
-SYSTEM_PROMPT = "You are a helpful assistant that analyzes images and answers questions about them."
+SYSTEM_PROMPT = (
+    "You are a helpful assistant with a camera feed and RC car control. "
+    "For questions about what you see, describe the image in plain text. "
+    "ONLY when the user explicitly asks to move, drive, turn, or control the car, "
+    "respond with ONLY this exact XML format:\n\n"
+    "<tool_call>\n"
+    '{\"name\": \"move\", \"arguments\": {\"action\": \"ACTION\"}}\n'
+    "</tool_call>\n\n"
+    "Replace ACTION with exactly one of: forward, backward, left, right, stop\n"
+    "Examples:\n"
+    "- 'move forward' or 'go closer' → action: forward\n"
+    "- 'go back' or 'reverse' → action: backward\n"
+    "- 'turn left' or 'go left' → action: left\n"
+    "- 'turn right' or 'go right' → action: right\n"
+    "- 'stop' or 'halt' → action: stop\n"
+    "For ALL other requests, respond in plain conversational text."
+)
 
 # Initialize logger
 logger = get_logger(__name__)

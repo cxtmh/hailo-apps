@@ -70,7 +70,7 @@ def execute_tool_call(
         return {"ok": False, "error": error_msg}
 
     try:
-        result = runner(args)  # type: ignore[misc]
+        result = runner(**args)  # type: ignore[misc]
 
         if not isinstance(result, dict):
             error_msg = f"Tool '{tool_name}' returned invalid format: expected dict, got {type(result).__name__}"
